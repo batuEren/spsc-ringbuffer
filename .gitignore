@@ -1,0 +1,52 @@
+# --- Build directories ---
+/build/
+/cmake-build-*/
+/out/
+/bin/
+/lib/
+
+# --- CMake generated files ---
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# --- CLion / JetBrains ---
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# --- OS-specific ---
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Linux
+*~
+
+# --- Logs ---
+*.log
+
+# --- Temporary files ---
+*.tmp
+*.swp
+*.swo
+
+# --- Generated executables / binaries ---
+*.exe
+*.out
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.dylib
+
+# --- Conan / vcpkg caches (if ever used) ---
+.conan/
+vcpkg_installed/
