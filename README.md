@@ -25,8 +25,3 @@ On my development machine (single producer thread + single consumer thread, tigh
 Here, one operation is defined as **one push + one pop pair**.
 
 >These numbers are **hardware- and workload-dependent**. They should be treated as indicative rather than absolute. If you try it on your own machine, please share results / open an issue.
-
-## Why is it faster than Boost in this test?
-
-
-
