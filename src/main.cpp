@@ -96,8 +96,15 @@ int main() {
     const std::size_t N = 10'000'000;       // 10M operations
     const std::size_t capacity = 1 << 16;   // 65536 entries
 
-    double ops_per_sec = benchmark_spsc(N, capacity);
-    std::cout << "Throughput: " << (ops_per_sec / 1e6) << " M ops/s\n";
+    double total = 0.0;
+
+    for(int i = 0; i<10; i++){
+        double ops_per_sec = benchmark_spsc(N, capacity);
+        std::cout << "Throughput: " << (ops_per_sec / 1e6) << " M ops/s\n";
+        total += ops_per_sec;
+    }
+
+    std::cout << "Average Throughput: " << (total / 1e7) << " M ops/s\n";
 
     return 0;
 }
