@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 template<typename T, typename Alloc = std::allocator<T>>
-class Vector{
+class Vector {
 public:
 	using value_type = T;
 	using allocator_type = Alloc;
@@ -14,10 +14,10 @@ public:
 
 	explicit Vector(size_type capacity = 4,
 		allocator_type const& alloc = allocator_type{})
-		: allocator_type{ alloc }
+		: dsallocator_{ alloc }
 		, capacity_{ capacity }
-		, memBlock_{ allocator_traits::allocate(*this, capacity_) }
-		, size_(0)
+		, memBlock_ { allocator_traits::allocate(allocator_, capacity_) }
+		, size_{0}
 	{
 		if (capacity_ < 1) {
 			throw std::invalid_argument("capacity must be at least 1");
@@ -25,7 +25,11 @@ public:
 	}
 
 	~Vector() {
-		//to do
+		for (size_type i{ 0 }; i < size_; i++) {
+			allocator_traits::destroy(allocator_, memBlock_ + i);
+		}
+
+		allocator_traits::deallocate(allocator_, memBlock_, capacity_);
 	}
 
 	bool empty() const noexcept {
@@ -36,19 +40,33 @@ public:
 		return capacity_;
 	}
 
-	bool push_back() {
-
+	size_type size() {
+		return size_;
 	}
 
-	bool pop_back() {
-
+	value_type& operator[] (size_type index) {
+		//if (index >= size_) throw std::out_of_range("index out of bounds");
+		//no bounds checking for speed
+		return *(memBlock_ + index);
 	}
 
+	void push_back(const T& item) noexcept {
+		allocator_traits::construct(allocator_, memBlock_ + size_, item);
+		size_++;
+	}
 
+	// add emplace back
+
+	void pop_back() {
+		if (size_ == 0) return; // check effect on performance
+		size_--;
+		allocator_traits::destroy(allocator_, memBlock_ + size_);
+		//possible shrink
+	}
 		
 private:
-	compressed_pair<Alloc, T*> memory;
-	const size_type capacity_;
-	const size_type size_;
+	Alloc allocator_;
 	T* memBlock_;
+	size_type capacity_;
+	size_type size_;
 };

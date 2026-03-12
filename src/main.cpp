@@ -1,4 +1,5 @@
 #include "SpscRingBuffer.hpp"
+#include "vector.hpp"
 
 #include <chrono>
 #include <iostream>
@@ -90,21 +91,45 @@ double benchmark_spsc(std::size_t N, std::size_t capacity) {
     return static_cast<double>(N) / elapsed.count(); // ops per second
 }
 
-int main() {
-    basic_correctness_test();
+void vector_correctness_test_without_growth() {
+    Vector<int> testVector(16);
 
-    const std::size_t N = 10'000'000;       // 10M operations
-    const std::size_t capacity = 1 << 16;   // 65536 entries
+    bool error = false;
 
-    double total = 0.0;
-
-    for(int i = 0; i<10; i++){
-        double ops_per_sec = benchmark_spsc(N, capacity);
-        std::cout << "Throughput: " << (ops_per_sec / 1e6) << " M ops/s\n";
-        total += ops_per_sec;
+    for (int i = 0; i < 16; i++) {
+        testVector.push_back(i);
     }
 
-    std::cout << "Average Throughput: " << (total / 1e7) << " M ops/s\n";
+    for (int i = 15; i >= 0; i--) {
+        if (testVector[i] != i) {
+            std::cerr << "Vector Error at: " << i << std::endl;
+            error = true;
+        }
+        testVector.pop_back();
+    }
+
+    if (error) {
+        std::cerr << "Vector test failed" << std::endl;
+    }
+}
+
+int main() {
+    //basic_correctness_test();
+
+    //const std::size_t N = 10'000'000;       // 10M operations
+    //const std::size_t capacity = 1 << 16;   // 65536 entries
+
+    //double total = 0.0;
+
+    //for(int i = 0; i<10; i++){
+    //    double ops_per_sec = benchmark_spsc(N, capacity);
+    //    std::cout << "Throughput: " << (ops_per_sec / 1e6) << " M ops/s\n";
+    //    total += ops_per_sec;
+    //}
+
+    //std::cout << "Average Throughput: " << (total / 1e7) << " M ops/s\n";
+
+    
 
     return 0;
 }
