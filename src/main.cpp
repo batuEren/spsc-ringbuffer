@@ -101,7 +101,7 @@ void vector_correctness_test_without_growth() {
     }
 
     for (int i = 15; i >= 0; i--) {
-        if (testVector[i] != i) {
+        if (testVector.back() != i) {
             std::cerr << "Vector Error at: " << i << std::endl;
             error = true;
         }
@@ -109,7 +109,7 @@ void vector_correctness_test_without_growth() {
     }
 
     if (error) {
-        std::cerr << "Vector test failed" << std::endl;
+        std::cerr << "Vector " << std::endl;
     }
 }
 

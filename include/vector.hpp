@@ -14,7 +14,7 @@ public:
 
 	explicit Vector(size_type capacity = 4,
 		allocator_type const& alloc = allocator_type{})
-		: dsallocator_{ alloc }
+		: allocator_{ alloc }
 		, capacity_{ capacity }
 		, memBlock_ { allocator_traits::allocate(allocator_, capacity_) }
 		, size_{0}
@@ -44,6 +44,18 @@ public:
 		return size_;
 	}
 
+	T& front() {
+		if (size_ > 0) return *(memBlock_);
+		
+		throw std::exception("no elements in vector");
+	}
+
+	T& back() {
+		if (size_ > 0) return *(memBlock_ + size_ - 1);
+
+		throw std::exception("no elements in vector");
+	}
+
 	value_type& operator[] (size_type index) {
 		//if (index >= size_) throw std::out_of_range("index out of bounds");
 		//no bounds checking for speed
@@ -53,6 +65,7 @@ public:
 	void push_back(const T& item) noexcept {
 		allocator_traits::construct(allocator_, memBlock_ + size_, item);
 		size_++;
+		//add growth
 	}
 
 	// add emplace back
