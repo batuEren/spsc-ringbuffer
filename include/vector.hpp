@@ -26,7 +26,8 @@ public:
 	}
 
 	~Vector() {
-		dealloc(memBlock_, size_);
+		delete_elems(memBlock_, size_);
+		allocator_traits::deallocate(allocator_, memBlock_, capacity_);
 	}
 
 	bool empty() const noexcept {
@@ -65,9 +66,10 @@ public:
 			T* newMemBlock = allocator_traits::allocate(allocator_, capacity_ * 2);
 			//move everything
 			for (size_type i{ 0 }; i < size_; i++) {
-				*(newMemBlock + i) = *(memBlock_ + i);
+				allocator_traits::construct(allocator_, newMemBlock + i, *(memBlock_ + i));
 			}
-			dealloc(memBlock_, capacity_);
+			delete_elems(memBlock_, size_);
+			allocator_traits::deallocate(allocator_, memBlock_, capacity_);
 
 			capacity_ *= 2;
 
@@ -88,11 +90,10 @@ public:
 	}
 		
 private:
-	void dealloc(T* ptr, size_type size) {
+	void delete_elems(T* ptr, size_type size) {
 		for (size_type i{ 0 }; i < size; i++) {
 			allocator_traits::destroy(allocator_, ptr + i);
 		}
-		allocator_traits::deallocate(allocator_, ptr, size);
 	}
 
 
