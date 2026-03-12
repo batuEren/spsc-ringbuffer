@@ -4,6 +4,7 @@
 /out/
 /bin/
 /lib/
+/.vs
 
 # --- CMake generated files ---
 CMakeFiles/
