@@ -3,6 +3,7 @@
 #include <memory>
 #include <type_traits>
 #include <stdexcept>
+#include <utility>
 
 template<typename T, typename Alloc = std::allocator<T>>
 class Vector {
@@ -25,9 +26,7 @@ public:
 	}
 
 	~Vector() {
-		for (size_type i{ 0 }; i < size_; i++) {
-			allocator_traits::destroy(allocator_, memBlock_ + i);
-		}
+		dealloc(memBlock_, size_);
 
 		allocator_traits::deallocate(allocator_, memBlock_, capacity_);
 	}
@@ -63,9 +62,22 @@ public:
 	}
 
 	void push_back(const T& item) noexcept {
+		if (size_ >= capacity_) {
+			//alloc new memory
+			T* newMemBlock = allocator_traits::allocate(allocator_, capacity_ * 2);
+			//move everything
+			for (size_type i{ 0 }; i < size_; i++) {
+				*(newMemBlock + i) = std::move(*(memBlock_ + i));
+			}
+			dealloc(memBlock_, capacity_);
+
+			capacity_ *= 2;
+
+			memBlock_ = newMemBlock;
+		}
+
 		allocator_traits::construct(allocator_, memBlock_ + size_, item);
 		size_++;
-		//add growth
 	}
 
 	// add emplace back
@@ -78,6 +90,13 @@ public:
 	}
 		
 private:
+	void dealloc(T* ptr, size_type size) {
+		for (size_type i{ 0 }; i < size; i++) {
+			allocator_traits::destroy(allocator_, ptr + i);
+		}
+	}
+
+
 	Alloc allocator_;
 	T* memBlock_;
 	size_type capacity_;

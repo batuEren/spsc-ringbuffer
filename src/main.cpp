@@ -92,7 +92,7 @@ double benchmark_spsc(std::size_t N, std::size_t capacity) {
 }
 
 void vector_correctness_test_without_growth() {
-    Vector<int> testVector(16);
+    Vector<int> testVector(4);
 
     bool error = false;
 
