@@ -41,16 +41,50 @@ public:
 	}
 
 	Vector& operator=(const Vector& other) { // copy assignment constr
+		if (this == &other) return *this; // self guard
 
+		delete_elems(memBlock_, size_);
+		allocator_traits::deallocate(allocator_, memBlock_, capacity_);
+		memBlock_ = allocator_traits::allocate(allocator_, other.capacity());
+
+		size_ = 0;
+		capacity_ = other.capacity_;
+
+		for (const value_type& e : other) {
+			push_back(e);
+		}
+		return *this;
 	}
 
 
-	Vector(Vector&& other) { // move constr
-
+	Vector(Vector&& other) noexcept // move constr
+		: allocator_(std::move(other.allocator_))
+		, capacity_(other.capacity_)
+		, size_(other.size_)
+		, memBlock_(other.memBlock_) 
+	{
+		other.memBlock_ = nullptr;
+		other.size_ = 0;
+		other.capacity_ = 0;
 	}
 
-	Vector& operator=(Vector&& other) { // move assignment constr
+	Vector& operator=(Vector&& other) 
+	{ // move assignment constr
+		if (this == &other) return *this;
 
+		delete_elems(memBlock_, size_);
+		allocator_traits::deallocate(allocator_, memBlock_, capacity_);
+
+		allocator_ = other.allocator_;
+		capacity_ = other.capacity_;
+		size_ = other.size_;
+		memBlock_ = other.memBlock_;
+
+		other.memBlock_ = nullptr;
+		other.capacity_ = 0;
+		other.size_ = 0;
+
+		return *this;
 	}
 
 	T* begin() const { return memBlock_; }
