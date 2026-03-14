@@ -100,12 +100,14 @@ void vector_correctness_test_without_growth() {
         testVector.push_back(i);
     }
 
+    Vector<int> testVector2 = testVector;
+
     for (int i = 15; i >= 0; i--) {
-        if (testVector.back() != i) {
+        if (testVector2.back() != i) {
             std::cerr << "Vector Error at: " << i << std::endl;
             error = true;
         }
-        testVector.pop_back();
+        testVector2.pop_back();
     }
 
     if (error) {

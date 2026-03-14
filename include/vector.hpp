@@ -17,12 +17,12 @@ public:
 		allocator_type const& alloc = allocator_type{})
 		: allocator_{ alloc }
 		, capacity_{ capacity }
-		, memBlock_ { allocator_traits::allocate(allocator_, capacity_) }
 		, size_{0}
 	{
 		if (capacity_ < 1) {
 			throw std::invalid_argument("capacity must be at least 1");
 		}
+		memBlock_ = allocator_traits::allocate(allocator_, capacity_);
 	}
 
 	~Vector() {
@@ -30,28 +30,66 @@ public:
 		allocator_traits::deallocate(allocator_, memBlock_, capacity_);
 	}
 
+	Vector(const Vector& other) // copy cons
+		: size_(0),
+		capacity_(other.capacity()),
+		memBlock_(allocator_traits::allocate(allocator_, other.capacity()))
+		{
+		for (const value_type& e : other) {
+			push_back(e);
+		}
+	}
+
+	Vector& operator=(const Vector& other) { // copy assignment constr
+
+	}
+
+
+	Vector(Vector&& other) { // move constr
+
+	}
+
+	Vector& operator=(Vector&& other) { // move assignment constr
+
+	}
+
+	T* begin() const { return memBlock_; }
+	T* end()   const { return memBlock_ + size_; }
+
 	bool empty() const noexcept {
 		return size_ == 0;
 	}
 
-	size_type capacity() {
+	size_type capacity() const {
 		return capacity_;
 	}
 
-	size_type size() {
+	size_type size() const {
 		return size_;
 	}
 
 	T& front() {
 		if (size_ > 0) return *(memBlock_);
 		
-		throw std::exception("no elements in vector");
+		throw std::runtime_error("no elements in vector");
 	}
 
 	T& back() {
 		if (size_ > 0) return *(memBlock_ + size_ - 1);
 
-		throw std::exception("no elements in vector");
+		throw std::runtime_error("no elements in vector");
+	}
+
+	const T& front() const {
+		if (size_ > 0) return *(memBlock_);
+
+		throw std::runtime_error("no elements in vector");
+	}
+
+	const T& back() const {
+		if (size_ > 0) return *(memBlock_ + size_ - 1);
+
+		throw std::runtime_error("no elements in vector");
 	}
 
 	value_type& operator[] (size_type index) {
@@ -60,7 +98,7 @@ public:
 		return *(memBlock_ + index);
 	}
 
-	void push_back(const T& item) noexcept {
+	void push_back(const T& item) {
 		if (size_ >= capacity_) {
 			//alloc new memory
 			T* newMemBlock = allocator_traits::allocate(allocator_, capacity_ * 2);
