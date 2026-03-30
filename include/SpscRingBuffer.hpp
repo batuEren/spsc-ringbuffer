@@ -25,6 +25,7 @@ public:
             , ring_{allocator_traits::allocate(*this, capacity_)}
     {
         if (capacity_ < 2) {
+            allocator_traits::deallocate(*this, ring_, capacity_)
             throw std::invalid_argument("capacity must be at least 2");
         }
         head_.store(0, std::memory_order_relaxed);
@@ -32,13 +33,7 @@ public:
     }
 
     ~SpscRingBuffer() {
-        auto tail = tail_.load(std::memory_order_relaxed);
-        auto head = head_.load(std::memory_order_relaxed);
-
-        while (tail != head) {
-            ++tail;
-        }
-
+        //no cleanup needed for primal types
         allocator_traits::deallocate(*this, ring_, capacity_);
     }
 
