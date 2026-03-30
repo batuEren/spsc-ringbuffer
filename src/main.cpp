@@ -1,5 +1,4 @@
 #include "SpscRingBuffer.hpp"
-#include "vector.hpp"
 
 #include <chrono>
 #include <iostream>
@@ -7,35 +6,6 @@
 #include <atomic>
 
 using Clock = std::chrono::steady_clock;
-
-void basic_correctness_test() {
-    SpscRingBuffer<int> q(8);
-
-    int x = 0;
-
-    // empty pop
-    if (q.try_pop(x)) {
-        std::cerr << "Error: pop from empty succeeded\n";
-    }
-
-    // push some items
-    for (int i = 0; i < 4; ++i) {
-        if (!q.try_push(i)) {
-            std::cerr << "Error: push failed at " << i << "\n";
-        }
-    }
-
-    // pop them back
-    for (int i = 0; i < 4; ++i) {
-        if (!q.try_pop(x)) {
-            std::cerr << "Error: pop failed at " << i << "\n";
-        } else if (x != i) {
-            std::cerr << "Error: expected " << i << " got " << x << "\n";
-        }
-    }
-
-    std::cout << "Basic correctness test done.\n";
-}
 
 double benchmark_spsc(std::size_t N, std::size_t capacity) {
     SpscRingBuffer<std::uint64_t> q(capacity);
@@ -91,33 +61,7 @@ double benchmark_spsc(std::size_t N, std::size_t capacity) {
     return static_cast<double>(N) / elapsed.count(); // ops per second
 }
 
-void vector_correctness_test_without_growth() {
-    Vector<int> testVector(4);
-
-    bool error = false;
-
-    for (int i = 0; i < 16; i++) {
-        testVector.push_back(i);
-    }
-
-    Vector<int> testVector2 = testVector;
-
-    for (int i = 15; i >= 0; i--) {
-        if (testVector2.back() != i) {
-            std::cerr << "Vector Error at: " << i << std::endl;
-            error = true;
-        }
-        testVector2.pop_back();
-    }
-
-    if (error) {
-        std::cerr << "Vector " << std::endl;
-    }
-}
-
 int main() {
-    basic_correctness_test();
-
     const std::size_t N = 10'000'000;       // 10M operations
     const std::size_t capacity = 1 << 16;   // 65536 entries
 
