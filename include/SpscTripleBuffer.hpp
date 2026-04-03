@@ -26,4 +26,18 @@ public:
 
 	}
 
+	void write() {
+
+	}
+
+	void read() {
+
+	}
+
+private:
+	Alloc allocator_;
+	T* buffer_;
+
+	alignas(64) std::atomic<size_type> read_;
+	alignas(64) std::atomic<size_type> write_;
 };
