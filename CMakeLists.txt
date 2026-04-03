@@ -30,3 +30,7 @@ gtest_discover_tests(spsc_tests)
 add_executable(spsc_benchmarks benchmarks/spsc_benchmarks.cpp)
 target_include_directories(spsc_benchmarks PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(spsc_benchmarks benchmark::benchmark_main)
+target_compile_options(spsc_benchmarks PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3>
+)

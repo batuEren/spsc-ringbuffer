@@ -68,7 +68,8 @@ public:
         auto head = head_.load(std::memory_order_relaxed);
         auto tail = tail_.load(std::memory_order_acquire); // see what consumer has done
 
-        if ((head - tail) == capacity_) {
+        if ((head - tail) == capacity_) [[unlikely]]
+        {
             // full
             return false;
         }
@@ -83,7 +84,8 @@ public:
         auto tail = tail_.load(std::memory_order_relaxed);
         auto head = head_.load(std::memory_order_acquire);
 
-        if (tail == head) {
+        if (tail == head) [[unlikely]]
+        {
             // empty
             return false;
         }
