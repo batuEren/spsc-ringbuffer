@@ -1,4 +1,4 @@
-#include "SpscRingBuffer.hpp"
+#include "bench_common.hpp"
 
 #include <benchmark/benchmark.h>
 #include <atomic>
@@ -7,75 +7,9 @@
 #include <cstdint>
 #include <thread>
 
-#if SPSC_HAS_BOOST
-#include <boost/lockfree/spsc_queue.hpp>
-#endif
-
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#elif defined(__linux__)
-#include <pthread.h>
-#include <sched.h>
-#endif
-
 namespace {
 
-using Value = std::uint64_t;
-
-// Two distinct physical cores on an SMT machine (logical ids are interleaved,
-// so 2 and 4 are siblings of different cores). Left unpinned, the scheduler is
-// free to co-locate the threads on one core's sibling hyperthreads — which
-// share L1 and make every queue look fast — or to migrate them mid-run. That
-// placement noise is larger than the gap between the two implementations.
-constexpr unsigned kProducerCpu = 2;
-constexpr unsigned kConsumerCpu = 4;
-
-void pin_to_cpu(unsigned cpu) {
-    const unsigned n = std::thread::hardware_concurrency();
-    if (n != 0) {
-        cpu %= n;
-    }
-#if defined(_WIN32)
-    SetThreadAffinityMask(GetCurrentThread(), static_cast<DWORD_PTR>(1) << cpu);
-#elif defined(__linux__)
-    cpu_set_t set;
-    CPU_ZERO(&set);
-    CPU_SET(cpu, &set);
-    pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
-#else
-    (void)cpu;
-#endif
-}
-
-// Adapters give both queues the same try_push/try_pop shape, so the harness
-// below compiles to the same code for each and the implementation is the only
-// variable.
-struct Mine {
-    explicit Mine(std::size_t capacity) : q(capacity) {}
-    bool try_push(Value v) noexcept { return q.try_push(v); }
-    bool try_pop(Value& v) noexcept { return q.try_pop(v); }
-
-    SpscRingBuffer<Value> q;
-};
-
-#if SPSC_HAS_BOOST
-// Same usable capacity as ours: boost allocates capacity+1 slots internally
-// and keeps one empty to distinguish full from empty, so both queues hold
-// exactly `capacity` elements for a given argument.
-struct Boost {
-    explicit Boost(std::size_t capacity) : q(capacity) {}
-    bool try_push(Value v) noexcept { return q.push(v); }
-    bool try_pop(Value& v) noexcept { return q.pop(v); }
-
-    boost::lockfree::spsc_queue<Value> q;
-};
-#endif
+using bench::Value;
 
 template <typename Queue>
 void BM_Throughput(benchmark::State& state) {
@@ -91,7 +25,7 @@ void BM_Throughput(benchmark::State& state) {
         std::uint64_t order_errors = 1; // overwritten by the consumer
 
         std::thread producer([&] {
-            pin_to_cpu(kProducerCpu);
+            bench::pin_to_cpu(bench::kProducerCpu);
             ready_producer.store(true, std::memory_order_release);
             while (!start_flag.load(std::memory_order_acquire)) {}
 
@@ -104,7 +38,7 @@ void BM_Throughput(benchmark::State& state) {
         });
 
         std::thread consumer([&] {
-            pin_to_cpu(kConsumerCpu);
+            bench::pin_to_cpu(bench::kConsumerCpu);
             ready_consumer.store(true, std::memory_order_release);
             while (!start_flag.load(std::memory_order_acquire)) {}
 
@@ -144,6 +78,23 @@ void BM_Throughput(benchmark::State& state) {
 
 constexpr int64_t kItems = 10'000'000;
 
+// Two spinning threads handing off 10M items is a noisy workload: the pair can
+// settle into batched hand-off or into item-at-a-time lockstep depending on how
+// the loops happen to line up at startup, and a single unlabelled mean says
+// nothing about which one you got. So each repetition is a full second of
+// transfers, and the run is a sample of kRepetitions of those seconds — enough
+// to quote a median and a spread rather than one number.
+//
+// An odd count so the median is an actual observation rather than the midpoint
+// of two. Budget ~1 s per repetition per row: six rows, so a shade over 90 s.
+constexpr double kSecondsPerRepetition = 1.0;
+constexpr int    kRepetitions          = 15;
+
+// Runs once per row, before the first recorded repetition, so page faults on a
+// fresh ring and the spin loops reaching steady state land outside the sample
+// set instead of skewing repetition 0.
+constexpr double kWarmUpSeconds = 0.5;
+
 // The capacity sweep isolates the one real difference between the two queues.
 // boost::lockfree::spsc_queue reloads the peer's index on every push and pop,
 // so it pays a coherence miss per item and lands near the same rate whatever
@@ -155,15 +106,21 @@ void configure(benchmark::internal::Benchmark* b) {
      ->Args({kItems, 1 << 12})
      ->Args({kItems, 1 << 16})
      ->UseManualTime()
+     ->MinWarmUpTime(kWarmUpSeconds)
+     ->MinTime(kSecondsPerRepetition)
+     ->Repetitions(kRepetitions)
+     // console shows the mean/median/stddev/cv rows only; --benchmark_out still
+     // records every individual repetition for anyone who wants the distribution
+     ->DisplayAggregatesOnly(true)
      ->Unit(benchmark::kMillisecond);
 }
 
 } // namespace
 
-BENCHMARK_TEMPLATE(BM_Throughput, Mine)->Name("SpscRingBuffer")->Apply(configure);
+BENCHMARK_TEMPLATE(BM_Throughput, bench::Mine)->Name("SpscRingBuffer")->Apply(configure);
 
 #if SPSC_HAS_BOOST
-BENCHMARK_TEMPLATE(BM_Throughput, Boost)->Name("boost::lockfree::spsc_queue")->Apply(configure);
+BENCHMARK_TEMPLATE(BM_Throughput, bench::Boost)->Name("boost::lockfree::spsc_queue")->Apply(configure);
 #endif
 
 BENCHMARK_MAIN();

@@ -37,9 +37,21 @@ enable_testing()
 include(GoogleTest)
 gtest_discover_tests(spsc_tests)
 
+# spsc_benchmarks measures throughput (queue kept full), spsc_latency_benchmarks
+# measures round-trip latency (queue kept empty). Separate binaries so one can be
+# run without the other's warm-up and pinning affecting the machine state.
 add_executable(spsc_benchmarks benchmarks/spsc_benchmarks.cpp)
-target_include_directories(spsc_benchmarks PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(spsc_benchmarks benchmark::benchmark_main Threads::Threads)
+add_executable(spsc_latency_benchmarks benchmarks/spsc_latency_benchmarks.cpp)
+set(SPSC_BENCH_TARGETS spsc_benchmarks spsc_latency_benchmarks)
+
+foreach(bench_target IN LISTS SPSC_BENCH_TARGETS)
+    target_include_directories(${bench_target} PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_link_libraries(${bench_target} benchmark::benchmark_main Threads::Threads)
+    target_compile_options(${bench_target} PRIVATE
+        $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>
+        $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3>
+    )
+endforeach()
 
 if (SPSC_BENCH_BOOST)
     # Boost.Lockfree is header-only but drags in a dozen Boost libs; let Boost's
@@ -53,11 +65,8 @@ if (SPSC_BENCH_BOOST)
     )
     FetchContent_MakeAvailable(Boost)
 
-    target_link_libraries(spsc_benchmarks Boost::lockfree)
-    target_compile_definitions(spsc_benchmarks PRIVATE SPSC_HAS_BOOST=1)
+    foreach(bench_target IN LISTS SPSC_BENCH_TARGETS)
+        target_link_libraries(${bench_target} Boost::lockfree)
+        target_compile_definitions(${bench_target} PRIVATE SPSC_HAS_BOOST=1)
+    endforeach()
 endif()
-
-target_compile_options(spsc_benchmarks PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>
-    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3>
-)
