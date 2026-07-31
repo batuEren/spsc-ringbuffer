@@ -40,7 +40,7 @@ gtest_discover_tests(spsc_tests)
 # spsc_benchmarks measures throughput (queue kept full), spsc_latency_benchmarks
 # measures round-trip latency (queue kept empty). Separate binaries so one can be
 # run without the other's warm-up and pinning affecting the machine state.
-add_executable(spsc_benchmarks benchmarks/spsc_benchmarks.cpp)
+add_executable(spsc_benchmarks benchmarks/spsc_throughput_benchmark.cpp)
 add_executable(spsc_latency_benchmarks benchmarks/spsc_latency_benchmarks.cpp)
 set(SPSC_BENCH_TARGETS spsc_benchmarks spsc_latency_benchmarks)
 

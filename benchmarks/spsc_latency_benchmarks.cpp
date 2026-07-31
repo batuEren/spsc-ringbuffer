@@ -1,4 +1,4 @@
-// Latency counterpart to spsc_benchmarks.cpp.
+// Latency counterpart to spsc_throughput_benchmark.cpp.
 //
 // Throughput asks how fast the queue drains a backlog; latency asks how long
 // one item takes to cross when there is no backlog at all. They are different
