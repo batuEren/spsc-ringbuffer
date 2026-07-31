@@ -6,8 +6,11 @@
 
 #include "SpscRingBuffer.hpp"
 
+#include <benchmark/benchmark.h>
+
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <thread>
 
 #if SPSC_HAS_BOOST
@@ -27,7 +30,6 @@
 #include <pthread.h>
 #include <sched.h>
 #include <fstream>
-#include <string>
 #endif
 
 namespace bench {
@@ -129,6 +131,40 @@ inline int cpu_pair_shares_core(unsigned a, unsigned b) {
     (void)b;
     return -1;
 #endif
+}
+
+// Every number either binary produces is a property of the producer/consumer
+// pair as much as of the queue: SMT siblings share L1 and never cross the core
+// boundary, and a pair that folds onto one logical CPU timeslices instead of
+// running concurrently. Either way the result is a different measurement
+// wearing the benchmark's label, so refuse to take it. Returns true when the
+// pair is usable; otherwise the benchmark has been skipped with an error.
+inline bool require_cross_core_pair(benchmark::State& state) {
+    const unsigned producer = effective_cpu(kProducerCpu);
+    const unsigned consumer = effective_cpu(kConsumerCpu);
+    if (producer == consumer) {
+        state.SkipWithError("producer and consumer fold onto one logical CPU on this machine");
+        return false;
+    }
+    if (cpu_pair_shares_core(producer, consumer) == 1) {
+        state.SkipWithError("producer and consumer CPUs are SMT siblings of one physical core");
+        return false;
+    }
+    return true;
+}
+
+// A hand-off across SMT siblings, across cores of one CCX, across CCXs, and
+// across sockets are four different experiments; record which one this run
+// was, next to the numbers, so results from different machines stay legible.
+// Call once from main, after benchmark::Initialize.
+inline void add_cpu_pair_context() {
+    const unsigned producer = effective_cpu(kProducerCpu);
+    const unsigned consumer = effective_cpu(kConsumerCpu);
+    const int shares_core   = cpu_pair_shares_core(producer, consumer);
+    benchmark::AddCustomContext("producer_cpu", std::to_string(producer));
+    benchmark::AddCustomContext("consumer_cpu", std::to_string(consumer));
+    benchmark::AddCustomContext("cpu_pair_shares_core",
+                                shares_core < 0 ? "unknown" : (shares_core != 0 ? "yes" : "no"));
 }
 
 // Adapters give both queues the same try_push/try_pop shape, so the harnesses

@@ -33,7 +33,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <thread>
 #include <vector>
 
@@ -147,18 +146,7 @@ constexpr int64_t kSamples = 100'000;
 
 template <typename Queue>
 void BM_RoundTrip(benchmark::State& state) {
-    // Round-trip latency is dominated by where the two threads actually sit —
-    // SMT siblings share L1 and never cross the core boundary, so a sibling
-    // pair produces a different measurement wearing this benchmark's label.
-    // Refuse it rather than report it.
-    const unsigned producer_cpu = bench::effective_cpu(bench::kProducerCpu);
-    const unsigned consumer_cpu = bench::effective_cpu(bench::kConsumerCpu);
-    if (producer_cpu == consumer_cpu) {
-        state.SkipWithError("producer and consumer fold onto one logical CPU on this machine");
-        return;
-    }
-    if (bench::cpu_pair_shares_core(producer_cpu, consumer_cpu) == 1) {
-        state.SkipWithError("producer and consumer CPUs are SMT siblings of one physical core");
+    if (!bench::require_cross_core_pair(state)) {
         return;
     }
 
@@ -339,16 +327,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Latency across SMT siblings, across cores of one CCX, across CCXs, and
-    // across sockets are four different experiments; record which one this
-    // was, next to the numbers, so runs from different machines stay legible.
-    const unsigned producer_cpu = bench::effective_cpu(bench::kProducerCpu);
-    const unsigned consumer_cpu = bench::effective_cpu(bench::kConsumerCpu);
-    const int shares_core       = bench::cpu_pair_shares_core(producer_cpu, consumer_cpu);
-    benchmark::AddCustomContext("producer_cpu", std::to_string(producer_cpu));
-    benchmark::AddCustomContext("consumer_cpu", std::to_string(consumer_cpu));
-    benchmark::AddCustomContext("cpu_pair_shares_core",
-                                shares_core < 0 ? "unknown" : (shares_core != 0 ? "yes" : "no"));
+    bench::add_cpu_pair_context();
 
     benchmark::RunSpecifiedBenchmarks();
     benchmark::Shutdown();

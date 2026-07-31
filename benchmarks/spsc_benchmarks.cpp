@@ -13,6 +13,10 @@ using bench::Value;
 
 template <typename Queue>
 void BM_Throughput(benchmark::State& state) {
+    if (!bench::require_cross_core_pair(state)) {
+        return;
+    }
+
     const std::size_t N        = static_cast<std::size_t>(state.range(0));
     const std::size_t capacity = static_cast<std::size_t>(state.range(1));
 
@@ -123,4 +127,18 @@ BENCHMARK_TEMPLATE(BM_Throughput, bench::Mine)->Name("SpscRingBuffer")->Apply(co
 BENCHMARK_TEMPLATE(BM_Throughput, bench::Boost)->Name("boost::lockfree::spsc_queue")->Apply(configure);
 #endif
 
-BENCHMARK_MAIN();
+// Not BENCHMARK_MAIN(): the run's CPU pair is recorded next to the numbers,
+// because throughput across a socket boundary and throughput inside one CCX
+// are not the same experiment.
+int main(int argc, char** argv) {
+    benchmark::Initialize(&argc, argv);
+    if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
+        return 1;
+    }
+
+    bench::add_cpu_pair_context();
+
+    benchmark::RunSpecifiedBenchmarks();
+    benchmark::Shutdown();
+    return 0;
+}
