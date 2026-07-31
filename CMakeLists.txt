@@ -37,12 +37,13 @@ enable_testing()
 include(GoogleTest)
 gtest_discover_tests(spsc_tests)
 
-# spsc_benchmarks measures throughput (queue kept full), spsc_latency_benchmarks
-# measures round-trip latency (queue kept empty). Separate binaries so one can be
-# run without the other's warm-up and pinning affecting the machine state.
-add_executable(spsc_benchmarks benchmarks/spsc_throughput_benchmark.cpp)
+# spsc_throughput_benchmark measures throughput (queue kept full),
+# spsc_latency_benchmarks measures round-trip latency (queue kept empty).
+# Separate binaries so one can be run without the other's warm-up and pinning
+# affecting the machine state.
+add_executable(spsc_throughput_benchmark benchmarks/spsc_throughput_benchmark.cpp)
 add_executable(spsc_latency_benchmarks benchmarks/spsc_latency_benchmarks.cpp)
-set(SPSC_BENCH_TARGETS spsc_benchmarks spsc_latency_benchmarks)
+set(SPSC_BENCH_TARGETS spsc_throughput_benchmark spsc_latency_benchmarks)
 
 foreach(bench_target IN LISTS SPSC_BENCH_TARGETS)
     target_include_directories(${bench_target} PRIVATE ${CMAKE_SOURCE_DIR}/include)
