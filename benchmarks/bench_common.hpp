@@ -22,9 +22,12 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <vector>
 #elif defined(__linux__)
 #include <pthread.h>
 #include <sched.h>
+#include <fstream>
+#include <string>
 #endif
 
 namespace bench {
@@ -39,11 +42,16 @@ using Value = std::uint64_t;
 constexpr unsigned kProducerCpu = 2;
 constexpr unsigned kConsumerCpu = 4;
 
-inline void pin_to_cpu(unsigned cpu) {
+// The id a thread actually lands on: the constants above wrap on machines with
+// fewer logical CPUs, and on a small enough machine both can fold onto the
+// same one. Exposed so a harness can report — or refuse — the pair it got.
+inline unsigned effective_cpu(unsigned cpu) {
     const unsigned n = std::thread::hardware_concurrency();
-    if (n != 0) {
-        cpu %= n;
-    }
+    return n != 0 ? cpu % n : cpu;
+}
+
+inline void pin_to_cpu(unsigned cpu) {
+    cpu = effective_cpu(cpu);
 #if defined(_WIN32)
     SetThreadAffinityMask(GetCurrentThread(), static_cast<DWORD_PTR>(1) << cpu);
 #elif defined(__linux__)
@@ -53,6 +61,73 @@ inline void pin_to_cpu(unsigned cpu) {
     pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
 #else
     (void)cpu;
+#endif
+}
+
+// Whether two logical CPUs are SMT siblings of one physical core: 1 yes,
+// 0 no, -1 can't tell. Siblings share L1 and the store buffers, so a hand-off
+// between them never crosses the core boundary — any result taken on such a
+// pair is a measurement of the core, not of the queue. The comment on the
+// constants above assumes ids 2 and 4 are distinct cores; this checks the
+// assumption against the actual topology instead of trusting the enumeration
+// order.
+inline int cpu_pair_shares_core(unsigned a, unsigned b) {
+#if defined(_WIN32)
+    // ids past the width of one group-relative affinity mask belong to another
+    // processor group, which is outside what pin_to_cpu handles anyway
+    constexpr unsigned kMaskBits = sizeof(KAFFINITY) * 8;
+    if (a >= kMaskBits || b >= kMaskBits) {
+        return -1;
+    }
+    DWORD len = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || len == 0) {
+        return -1;
+    }
+    std::vector<unsigned char> buf(len);
+    auto* base = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buf.data());
+    if (!GetLogicalProcessorInformationEx(RelationProcessorCore, base, &len)) {
+        return -1;
+    }
+    int core_a = -1;
+    int core_b = -1;
+    int core   = 0;
+    for (DWORD off = 0; off < len; ++core) {
+        const auto* info =
+                reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buf.data() + off);
+        const KAFFINITY mask = info->Processor.GroupMask[0].Mask;
+        if ((mask >> a) & 1u) {
+            core_a = core;
+        }
+        if ((mask >> b) & 1u) {
+            core_b = core;
+        }
+        off += info->Size;
+    }
+    if (core_a < 0 || core_b < 0) {
+        return -1;
+    }
+    return core_a == core_b ? 1 : 0;
+#elif defined(__linux__)
+    const auto topology_id = [](unsigned cpu, const char* leaf) -> long {
+        std::ifstream f("/sys/devices/system/cpu/cpu" + std::to_string(cpu)
+                        + "/topology/" + leaf);
+        long v = -1;
+        f >> v;
+        return f ? v : -1;
+    };
+    const long pkg_a  = topology_id(a, "physical_package_id");
+    const long pkg_b  = topology_id(b, "physical_package_id");
+    const long core_a = topology_id(a, "core_id");
+    const long core_b = topology_id(b, "core_id");
+    if (pkg_a < 0 || pkg_b < 0 || core_a < 0 || core_b < 0) {
+        return -1;
+    }
+    return (pkg_a == pkg_b && core_a == core_b) ? 1 : 0;
+#else
+    (void)a;
+    (void)b;
+    return -1;
 #endif
 }
 

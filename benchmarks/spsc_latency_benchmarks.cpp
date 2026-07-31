@@ -4,10 +4,20 @@
 // one item takes to cross when there is no backlog at all. They are different
 // questions and they stress different code: the throughput harness keeps the
 // ring full, this one keeps it empty, so every pop here misses and has to go
-// look at the producer's index. The cached-peer-index trick that wins the
-// throughput benchmark does nothing on an empty ring — both queues reload the
-// shared line on every single hop — so this is the workload where the two are
-// expected to land close together.
+// look at the producer's index.
+//
+// Prediction, stated up front so the result either confirms it or flags a
+// surprise: the empty ring defeats the cached-index trick on the pop side
+// only — there both queues reload the producer's index on every attempt. The
+// push side still differs. boost::lockfree::spsc_queue loads read_index_ on
+// every push to test fullness, and the consumer has advanced that index since
+// the previous push, so that load is a coherence miss every single time. Ours
+// tests fullness against cached_tail_, which with one token in flight is only
+// refreshed once per kCapacity pushes, so 1023 pushes out of 1024 skip the
+// shared load entirely. A round trip contains two pushes, one per direction,
+// both inside the stamped window — so the expectation is not a tie but ours
+// ahead by roughly two cache-line transfers per round trip. A tie would mean
+// the transfer is hidden by something else, and would itself need explaining.
 //
 // Measured as a ping-pong round trip over two queues: ping stamps the clock,
 // pushes a token, spins for the echo, stamps again. Both stamps are taken on
@@ -23,6 +33,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -103,12 +114,6 @@ double timer_overhead_ticks() {
     return value;
 }
 
-void spin_ticks(std::uint64_t ticks) noexcept {
-    const std::uint64_t deadline = now_ticks() + ticks;
-    while (now_ticks() < deadline) {
-    }
-}
-
 // nearest-rank, on an already sorted sample set
 std::uint64_t percentile(const std::vector<std::uint64_t>& sorted, double p) {
     if (sorted.empty()) {
@@ -128,16 +133,49 @@ constexpr std::size_t kCapacity = 1024;
 // spin loops reach steady state.
 constexpr int kWarmupRoundTrips = 50'000;
 
+// For the cold rows, a short second warmup with the eviction walk in place, so
+// the recorded loop starts in its steady trip-then-walk rhythm without paying
+// the walk 50'000 times.
+constexpr int kEvictWarmupRoundTrips = 256;
+
 // Fixed sample count instead of a min-time target: percentiles are only
 // comparable across rows if every row is a percentile of the same n, and it
-// keeps the pre-sized sample buffer honest.
-constexpr int64_t kSamples = 200'000;
+// keeps the pre-sized sample buffer honest. 100k rather than more because the
+// cold rows pay a scratch walk per sample and the whole table runs 9 times;
+// each repetition still puts 100 samples beyond its p999.
+constexpr int64_t kSamples = 100'000;
 
 template <typename Queue>
 void BM_RoundTrip(benchmark::State& state) {
+    // Round-trip latency is dominated by where the two threads actually sit —
+    // SMT siblings share L1 and never cross the core boundary, so a sibling
+    // pair produces a different measurement wearing this benchmark's label.
+    // Refuse it rather than report it.
+    const unsigned producer_cpu = bench::effective_cpu(bench::kProducerCpu);
+    const unsigned consumer_cpu = bench::effective_cpu(bench::kConsumerCpu);
+    if (producer_cpu == consumer_cpu) {
+        state.SkipWithError("producer and consumer fold onto one logical CPU on this machine");
+        return;
+    }
+    if (bench::cpu_pair_shares_core(producer_cpu, consumer_cpu) == 1) {
+        state.SkipWithError("producer and consumer CPUs are SMT siblings of one physical core");
+        return;
+    }
+
     const double tick_ns = ns_per_tick(); // calibrate before anything is timed
-    const auto idle_ticks =
-            static_cast<std::uint64_t>(static_cast<double>(state.range(0)) / tick_ns);
+
+    // Scratch for the cold rows, sized by the row argument and filled here so
+    // its pages are faulted in before anything is recorded. One read per cache
+    // line displaces the line; the running sum keeps the loads alive.
+    constexpr std::size_t kWordsPerLine = 64 / sizeof(std::uint64_t);
+    std::vector<std::uint64_t> scratch(
+            static_cast<std::size_t>(state.range(0)) * 1024 / sizeof(std::uint64_t), 1);
+    std::uint64_t evict_sink = 0;
+    auto evict = [&]() noexcept {
+        for (std::size_t i = 0; i < scratch.size(); i += kWordsPerLine) {
+            evict_sink += scratch[i];
+        }
+    };
 
     Queue to_pong(kCapacity);
     Queue to_ping(kCapacity);
@@ -184,12 +222,22 @@ void BM_RoundTrip(benchmark::State& state) {
         return t1 - t0;
     };
 
+    // Sized then cleared, not reserved: writing the zeroes first-touches every
+    // page here, so no push_back below takes a page fault mid-run. reserve()
+    // alone leaves the pages unmapped and the faults land between stamped
+    // regions, where they can drag a scheduling event into the tail.
+    std::vector<std::uint64_t> samples(static_cast<std::size_t>(state.max_iterations), 0);
+    samples.clear();
+
     for (int i = 0; i < kWarmupRoundTrips; ++i) {
         round_trip();
     }
-
-    std::vector<std::uint64_t> samples;
-    samples.reserve(static_cast<std::size_t>(state.max_iterations));
+    if (!scratch.empty()) {
+        for (int i = 0; i < kEvictWarmupRoundTrips; ++i) {
+            round_trip();
+            evict();
+        }
+    }
 
     for (auto _ : state) {
         const std::uint64_t ticks = round_trip();
@@ -197,13 +245,14 @@ void BM_RoundTrip(benchmark::State& state) {
         samples.push_back(ticks);
         state.SetIterationTime(static_cast<double>(ticks) * tick_ns * 1e-9);
 
-        if (idle_ticks != 0) {
-            spin_ticks(idle_ticks);
+        if (!scratch.empty()) {
+            evict();
         }
     }
 
     stop.store(true, std::memory_order_relaxed);
     pong.join();
+    benchmark::DoNotOptimize(evict_sink);
 
     if (mismatches != 0) {
         state.SkipWithError("round-trip payload mismatch");
@@ -226,17 +275,36 @@ void BM_RoundTrip(benchmark::State& state) {
     state.counters["timer_ns"] = timer_overhead_ticks() * tick_ns;
 }
 
-// The idle sweep is to latency what the capacity sweep is to throughput. At 0
+// The cold sweep is to latency what the capacity sweep is to throughput. At 0
 // the two threads hand off back to back and every predictor and cache line is
-// hot — the best case, and the one most benchmarks stop at. Pausing between
-// round trips is closer to how a real feed behaves and shows whether the queue
-// stays predictable when the hand-off is not already in flight.
+// hot — the best case, and the one most benchmarks stop at. A real producer
+// does other work between events, and that work evicts the queue's lines.
+//
+// Note that merely *waiting* between round trips cannot produce that state:
+// with both threads spinning through the pause, nothing leaves L1 and no core
+// drops frequency, so a timed-idle sweep just measures the hot case again at
+// three times the runtime. Cold has to be manufactured — between round trips
+// ping walks `evict_kb` kilobytes of scratch (outside the stamped region),
+// displacing its copies of the ring, the indices, and their TLB entries.
+// 256 KB clears L1; 4 MB, twice a typical L2, sends the producer-side lines
+// back to L3 or memory. Pong keeps polling and stays warm throughout — the
+// scenario is a consumer waiting hot while the producer arrives cold with the
+// event, which is the shape of an event-driven system between events. The 4 MB
+// walk is what bounds this binary's runtime: roughly 100–200 us per trip, a
+// couple of minutes per queue across the repetitions.
+//
+// 9 repetitions (odd, so the median is an observation) put spread across the
+// whole table; interleaving — see main — decides what that spread is charged to.
 void configure(benchmark::internal::Benchmark* b) {
-    b->ArgName("idle_ns")
+    b->ArgName("evict_kb")
      ->Arg(0)
-     ->Arg(1'000)
-     ->Arg(10'000)
+     ->Arg(256)
+     ->Arg(4096)
      ->Iterations(kSamples)
+     ->Repetitions(9)
+     // console shows mean/median/stddev/cv over the repetitions only;
+     // --benchmark_out still records every individual repetition
+     ->DisplayAggregatesOnly(true)
      ->UseManualTime()
      ->Unit(benchmark::kNanosecond);
 }
@@ -249,4 +317,40 @@ BENCHMARK_TEMPLATE(BM_RoundTrip, bench::Mine)->Name("SpscRingBuffer")->Apply(con
 BENCHMARK_TEMPLATE(BM_RoundTrip, bench::Boost)->Name("boost::lockfree::spsc_queue")->Apply(configure);
 #endif
 
-BENCHMARK_MAIN();
+// Not BENCHMARK_MAIN(): by default google-benchmark finishes every repetition
+// of one benchmark before starting the next, so thermal and turbo drift over
+// the run lands entirely on whichever queue ran second and is confounded with
+// queue identity. Random interleaving shuffles all repetitions together so
+// drift is charged to both queues equally. The flag is injected ahead of the
+// real argv, so an explicit --benchmark_enable_random_interleaving=false on
+// the command line still wins.
+int main(int argc, char** argv) {
+    std::vector<char*> args;
+    args.reserve(static_cast<std::size_t>(argc) + 1);
+    args.push_back(argv[0]);
+    static char interleave[] = "--benchmark_enable_random_interleaving=true";
+    args.push_back(interleave);
+    for (int i = 1; i < argc; ++i) {
+        args.push_back(argv[i]);
+    }
+    int argn = static_cast<int>(args.size());
+    benchmark::Initialize(&argn, args.data());
+    if (benchmark::ReportUnrecognizedArguments(argn, args.data())) {
+        return 1;
+    }
+
+    // Latency across SMT siblings, across cores of one CCX, across CCXs, and
+    // across sockets are four different experiments; record which one this
+    // was, next to the numbers, so runs from different machines stay legible.
+    const unsigned producer_cpu = bench::effective_cpu(bench::kProducerCpu);
+    const unsigned consumer_cpu = bench::effective_cpu(bench::kConsumerCpu);
+    const int shares_core       = bench::cpu_pair_shares_core(producer_cpu, consumer_cpu);
+    benchmark::AddCustomContext("producer_cpu", std::to_string(producer_cpu));
+    benchmark::AddCustomContext("consumer_cpu", std::to_string(consumer_cpu));
+    benchmark::AddCustomContext("cpu_pair_shares_core",
+                                shares_core < 0 ? "unknown" : (shares_core != 0 ? "yes" : "no"));
+
+    benchmark::RunSpecifiedBenchmarks();
+    benchmark::Shutdown();
+    return 0;
+}
